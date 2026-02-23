@@ -63,10 +63,16 @@ export default function StakeCard() {
           <span>Exchange Rate</span>
           <span className="text-neutral-400">1 sXLM = {stats.exchangeRate.toFixed(4)} XLM</span>
         </div>
+        {isConnected && (
+          <div className="flex justify-between">
+            <span>Available XLM</span>
+            <span className="text-neutral-400">{balance.xlmNativeBalance.toFixed(4)} XLM</span>
+          </div>
+        )}
         {isConnected && balance.sxlmBalance > 0 && (
           <div className="flex justify-between">
             <span>Your sXLM</span>
-            <span className="text-neutral-400">{balance.sxlmBalance.toFixed(4)}</span>
+            <span className="font-mono" style={{ color: '#F5CF00' }}>{balance.sxlmBalance.toFixed(4)} sXLM</span>
           </div>
         )}
         <div className="flex justify-between">

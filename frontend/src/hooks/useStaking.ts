@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import axios from '../lib/apiClient';
-import { API_BASE_URL } from '../config/contracts';
+import { API_BASE_URL, NETWORK } from '../config/contracts';
 import { useWallet } from './useWallet';
 
 interface StakingState {
@@ -15,6 +15,7 @@ interface BalanceInfo {
   sxlmBalance: number;
   xlmValue: number;
   exchangeRate: number;
+  xlmNativeBalance: number;
   archived?: boolean;
 }
 
@@ -48,7 +49,7 @@ export function useStaking(): UseStakingReturn {
     lastTxHash: null,
   });
   const [pendingWithdrawals, setPendingWithdrawals] = useState<PendingWithdrawal[]>([]);
-  const [balance, setBalance] = useState<BalanceInfo>({ sxlmBalance: 0, xlmValue: 0, exchangeRate: 1 });
+  const [balance, setBalance] = useState<BalanceInfo>({ sxlmBalance: 0, xlmValue: 0, exchangeRate: 1, xlmNativeBalance: 0 });
 
   const clearError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
@@ -57,11 +58,26 @@ export function useStaking(): UseStakingReturn {
   const refreshBalance = useCallback(async () => {
     if (!publicKey) return;
     try {
-      const { data } = await axios.get(`${API_BASE_URL}/api/balance/${publicKey}`);
+      const [{ data }, accountRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/api/balance/${publicKey}`),
+        fetch(`${NETWORK.horizonUrl}/accounts/${publicKey}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+
+      let xlmNativeBalance = 0;
+      if (accountRes?.balances) {
+        const nativeBal = accountRes.balances.find(
+          (b: { asset_type: string; balance: string }) => b.asset_type === 'native'
+        );
+        if (nativeBal) xlmNativeBalance = parseFloat(nativeBal.balance);
+      }
+
       setBalance({
         sxlmBalance: data.sxlmBalance,
         xlmValue: data.xlmValue,
         exchangeRate: data.exchangeRate,
+        xlmNativeBalance,
         archived: data.archived ?? false,
       });
     } catch {

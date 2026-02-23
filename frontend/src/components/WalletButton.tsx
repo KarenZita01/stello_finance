@@ -82,13 +82,20 @@ export default function WalletButton() {
             <p className="text-[10px] mb-1" style={{ color: '#525252' }}>Connected</p>
             <p className="font-mono text-[10px] break-all" style={{ color: '#6b6b6b' }}>{publicKey}</p>
             <div className="mt-2 pt-2" style={{ borderTop: '1px solid #1e1e1e' }}>
+              <p className="text-[10px] mb-0.5" style={{ color: '#525252' }}>XLM in Wallet</p>
+              <p className="font-mono text-sm font-semibold" style={{ color: '#ccc' }}>
+                {balance.xlmNativeBalance.toFixed(4)}
+                <span className="text-[10px] font-normal ml-1" style={{ color: '#525252' }}>XLM</span>
+              </p>
+            </div>
+            <div className="mt-2 pt-2" style={{ borderTop: '1px solid #1e1e1e' }}>
               <p className="text-[10px] mb-0.5" style={{ color: '#525252' }}>sXLM Balance</p>
               <p className="font-mono text-sm font-semibold" style={{ color: '#F5CF00' }}>
                 {balance.sxlmBalance.toFixed(4)}
                 <span className="text-[10px] font-normal ml-1" style={{ color: '#525252' }}>sXLM</span>
               </p>
               <p className="text-[10px] mt-0.5" style={{ color: '#383838' }}>
-                ≈ {balance.xlmValue.toFixed(4)} XLM
+                ≈ {balance.xlmValue.toFixed(4)} XLM value
               </p>
             </div>
           </div>
