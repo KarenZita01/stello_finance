@@ -4,6 +4,11 @@ import axios from '../lib/apiClient';
 import { API_BASE_URL, NETWORK, CONTRACTS } from '../config/contracts';
 import { useWallet } from './useWallet';
 
+// Admin public key used as source for read-only Soroban simulations.
+// It's a known active account on mainnet — the user's own account may not
+// be loadable by getAccount() before their first Soroban interaction.
+const SIMULATION_SOURCE = 'GDWXTIIROGCVBSNQMBJFH6HOWQ4YSRVMKSUS53CH6MP56WSWD6J4VZ5N';
+
 interface StakingState {
   isStaking: boolean;
   isUnstaking: boolean;
@@ -84,7 +89,7 @@ export function useStaking(): UseStakingReturn {
       let sxlmBalance = 0;
       try {
         const soroban = new SorobanRpc.Server(NETWORK.sorobanRpcUrl);
-        const account = await soroban.getAccount(publicKey);
+        const account = await soroban.getAccount(SIMULATION_SOURCE);
         const tx = new TransactionBuilder(account, {
           fee: BASE_FEE,
           networkPassphrase: NETWORK.networkPassphrase,
