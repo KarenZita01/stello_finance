@@ -35,8 +35,12 @@ export async function startApiGateway(deps: GatewayDeps) {
 
   await fastify.register(cors, { origin: true });
   await fastify.register(rateLimit, {
-    max: 500,
+    max: 200,
     timeWindow: "1 minute",
+    // Use X-Forwarded-For so Render's proxy doesn't collapse all IPs into one
+    keyGenerator: (request) =>
+      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+      request.ip,
   });
 
   // Decorate request with wallet field for auth

@@ -158,7 +158,7 @@ export function useProtocol(): UseProtocolReturn {
 
   useEffect(() => {
     fetchProtocolData();
-    const interval = setInterval(fetchProtocolData, 30_000);
+    const interval = setInterval(fetchProtocolData, 60_000);
     return () => clearInterval(interval);
   }, [fetchProtocolData]);
 
