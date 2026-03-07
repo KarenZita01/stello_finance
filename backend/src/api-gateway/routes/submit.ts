@@ -6,6 +6,7 @@ import {
   Contract,
   Address,
   nativeToScVal,
+  scValToNative,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
 import { config } from "../../config/index.js";
@@ -19,6 +20,57 @@ const claimSchema = z.object({
   userAddress: z.string().min(56).max(56),
   withdrawalId: z.string(),
 });
+
+/**
+ * Scan the staking contract's withdrawal queue to find the contract-side
+ * withdrawal ID for a given user address. The contract uses a global 0-based
+ * counter while the DB uses 1-based auto-increment, so they diverge for
+ * multi-user scenarios. Returns null if no unclaimed entry is found.
+ */
+async function findContractWithdrawalId(
+  server: rpc.Server,
+  userAddress: string,
+  maxScan = 50,
+): Promise<number | null> {
+  const stakingContract = new Contract(config.contracts.stakingContractId);
+  const adminAccount = await server.getAccount(config.admin.publicKey);
+
+  for (let id = 0; id < maxScan; id++) {
+    try {
+      const tx = new TransactionBuilder(adminAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: config.stellar.networkPassphrase,
+      })
+        .addOperation(
+          stakingContract.call(
+            "get_withdrawal",
+            nativeToScVal(id, { type: "u64" })
+          )
+        )
+        .setTimeout(30)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+
+      if (!rpc.Api.isSimulationSuccess(sim) || !sim.result) break; // past end of queue
+
+      const entry = scValToNative(sim.result.retval) as {
+        user: string;
+        claimed: boolean;
+        xlm_amount: string;
+        unlock_ledger: number;
+      };
+
+      if (entry.user === userAddress && !entry.claimed) {
+        return id;
+      }
+    } catch {
+      break; // no more entries
+    }
+  }
+
+  return null;
+}
 
 export const submitRoutes: FastifyPluginAsync<{ stakingEngine: StakingEngine }> = async (
   fastify,
@@ -89,16 +141,31 @@ export const submitRoutes: FastifyPluginAsync<{ stakingEngine: StakingEngine }> 
   /**
    * POST /staking/claim
    * Build an unsigned claim withdrawal transaction for user to sign.
+   *
+   * The contract uses a 0-based auto-increment counter for withdrawal IDs,
+   * but the frontend DB uses 1-based auto-increment IDs. To avoid mismatches,
+   * we scan the contract's withdrawal queue to find the correct contract-side
+   * ID for this user rather than blindly trusting the DB-provided withdrawalId.
    */
   fastify.post("/staking/claim", async (request, reply) => {
     try {
       const body = claimSchema.parse(request.body);
 
+      // Find the correct contract withdrawal ID by scanning the queue.
+      // Contract IDs start at 0 and auto-increment globally (not per-user).
+      // We try up to 50 IDs to find an unclaimed entry belonging to this user.
+      const contractId = await findContractWithdrawalId(server, body.userAddress);
+      if (contractId === null) {
+        return reply.status(400).send({
+          error: "No unclaimed withdrawal found for your address. It may already be claimed or the cooldown has not started yet.",
+        });
+      }
+
       const contract = new Contract(config.contracts.stakingContractId);
       const claimOp = contract.call(
         "claim_withdrawal",
         new Address(body.userAddress).toScVal(),
-        nativeToScVal(Number(body.withdrawalId), { type: "u64" })
+        nativeToScVal(contractId, { type: "u64" })
       );
 
       const account = await server.getAccount(body.userAddress);
@@ -113,6 +180,12 @@ export const submitRoutes: FastifyPluginAsync<{ stakingEngine: StakingEngine }> 
       const simResult = await server.simulateTransaction(tx);
 
       if (rpc.Api.isSimulationError(simResult)) {
+        const errStr = String(simResult.error);
+        if (errStr.includes("cooldown not expired")) {
+          return reply.status(400).send({
+            error: "Cooldown period has not expired yet. Please wait until your unlock time and try again.",
+          });
+        }
         return reply.status(400).send({
           error: `Simulation failed: ${simResult.error}`,
         });
@@ -123,6 +196,7 @@ export const submitRoutes: FastifyPluginAsync<{ stakingEngine: StakingEngine }> 
       return {
         xdr: preparedTx.toXDR(),
         networkPassphrase: config.stellar.networkPassphrase,
+        contractWithdrawalId: contractId,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : (err as { message?: string })?.message ?? "Claim failed";
