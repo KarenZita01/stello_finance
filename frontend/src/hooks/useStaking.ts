@@ -278,16 +278,21 @@ export function useStaking(): UseStakingReturn {
         }
 
         setState((prev) => ({ ...prev, isClaiming: false }));
-        // Refresh withdrawals inline to avoid stale closure
+
+        // Mark withdrawal as claimed in the backend DB
         try {
-          const { data } = await axios.get(
-            `${API_BASE_URL}/api/staking/withdrawals/${publicKey}`,
+          await axios.post(
+            `${API_BASE_URL}/api/staking/withdrawals/mark-claimed`,
+            { wallet: publicKey, withdrawalId },
             { headers: getAuthHeaders() }
           );
-          setPendingWithdrawals(data.withdrawals || []);
         } catch {
-          // Silently fail
+          // Non-critical — UI will still remove it below
         }
+
+        // Remove claimed withdrawal from local state immediately
+        setPendingWithdrawals((prev) => prev.filter((w) => w.id !== withdrawalId));
+        await refreshBalance();
         return true;
       } catch (err: unknown) {
         const message =
