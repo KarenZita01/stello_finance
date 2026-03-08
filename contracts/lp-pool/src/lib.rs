@@ -22,6 +22,8 @@ pub enum DataKey {
     ReserveSxlm,
     TotalLpSupply,
     LpBalance(Address),
+    ProtocolFeeBps,
+    AccruedProtocolFees,
 }
 
 // --- Storage helpers ---
@@ -123,6 +125,8 @@ impl LpPoolContract {
         env.storage().instance().set(&DataKey::SxlmToken, &sxlm_token);
         env.storage().instance().set(&DataKey::NativeToken, &native_token);
         env.storage().instance().set(&DataKey::FeeBps, &(fee_bps as i128));
+        write_i128(&env, &DataKey::ProtocolFeeBps, 5); // 0.05% of swap input
+        write_i128(&env, &DataKey::AccruedProtocolFees, 0);
         extend_instance(&env);
     }
 
@@ -254,9 +258,18 @@ impl LpPoolContract {
         token::Client::new(&env, &native).transfer(&user, &env.current_contract_address(), &xlm_amount);
         token::Client::new(&env, &sxlm).transfer(&env.current_contract_address(), &user, &sxlm_out);
 
-        // Update reserves
-        write_i128(&env, &DataKey::ReserveXlm, reserve_xlm + xlm_amount);
+        // Protocol fee: carve out a portion of the LP fee for the protocol
+        let total_fee = xlm_amount - amount_after_fee;
+        let protocol_fee_bps = read_i128(&env, &DataKey::ProtocolFeeBps);
+        let protocol_cut = total_fee * protocol_fee_bps / fee_bps;
+
+        // Reserve gets full amount MINUS protocol cut
+        write_i128(&env, &DataKey::ReserveXlm, reserve_xlm + xlm_amount - protocol_cut);
         write_i128(&env, &DataKey::ReserveSxlm, reserve_sxlm - sxlm_out);
+
+        // Accumulate protocol fees
+        let accrued = read_i128(&env, &DataKey::AccruedProtocolFees);
+        write_i128(&env, &DataKey::AccruedProtocolFees, accrued + protocol_cut);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("swap"),),
@@ -301,7 +314,55 @@ impl LpPoolContract {
         xlm_out
     }
 
+    // ==========================================================
+    // Protocol fee management
+    // ==========================================================
+
+    /// Collect accrued protocol fees. Admin-only. Transfers XLM to admin and resets counter.
+    pub fn collect_protocol_fees(env: Env) -> i128 {
+        let admin = read_admin(&env);
+        admin.require_auth();
+        extend_instance(&env);
+
+        let accrued = read_i128(&env, &DataKey::AccruedProtocolFees);
+        if accrued <= 0 {
+            return 0;
+        }
+
+        let native = read_native_token(&env);
+        token::Client::new(&env, &native).transfer(&env.current_contract_address(), &admin, &accrued);
+
+        write_i128(&env, &DataKey::AccruedProtocolFees, 0);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("pf_col"),),
+            (admin, accrued),
+        );
+
+        accrued
+    }
+
+    /// Set protocol fee in basis points (portion of LP fee taken for protocol).
+    pub fn set_protocol_fee_bps(env: Env, bps: u32) {
+        let admin = read_admin(&env);
+        admin.require_auth();
+        extend_instance(&env);
+        write_i128(&env, &DataKey::ProtocolFeeBps, bps as i128);
+    }
+
     // --- Views ---
+
+    /// Returns accrued protocol fees in XLM stroops.
+    pub fn accrued_protocol_fees(env: Env) -> i128 {
+        extend_instance(&env);
+        read_i128(&env, &DataKey::AccruedProtocolFees)
+    }
+
+    /// Returns protocol fee in basis points.
+    pub fn protocol_fee_bps(env: Env) -> i128 {
+        extend_instance(&env);
+        read_i128(&env, &DataKey::ProtocolFeeBps)
+    }
 
     /// Returns (reserve_xlm, reserve_sxlm).
     pub fn get_reserves(env: Env) -> (i128, i128) {
@@ -341,7 +402,7 @@ mod test {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{token::StellarAssetClient, Env};
 
-    fn setup_test() -> (Env, Address, Address, Address, Address) {
+    fn setup_test() -> (Env, Address, Address, Address, Address, Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -359,12 +420,12 @@ mod test {
         StellarAssetClient::new(&env, &sxlm_id).mint(&user, &1_000_000_0000000);
         StellarAssetClient::new(&env, &native_id).mint(&user, &1_000_000_0000000);
 
-        (env, contract_id, sxlm_id, native_id, user)
+        (env, contract_id, sxlm_id, native_id, user, admin)
     }
 
     #[test]
     fn test_initialize() {
-        let (env, contract_id, _, _, _) = setup_test();
+        let (env, contract_id, _, _, _, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
         let (rx, rs) = client.get_reserves();
         assert_eq!(rx, 0);
@@ -374,7 +435,7 @@ mod test {
 
     #[test]
     fn test_add_liquidity_first() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         let lp = client.add_liquidity(&user, &10_000_0000000, &10_000_0000000);
@@ -389,7 +450,7 @@ mod test {
 
     #[test]
     fn test_add_and_remove_liquidity() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         let lp = client.add_liquidity(&user, &10_000_0000000, &10_000_0000000);
@@ -406,7 +467,7 @@ mod test {
 
     #[test]
     fn test_swap_xlm_to_sxlm() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         // Add liquidity first
@@ -421,7 +482,7 @@ mod test {
 
     #[test]
     fn test_swap_sxlm_to_xlm() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
@@ -433,7 +494,7 @@ mod test {
 
     #[test]
     fn test_get_price() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
@@ -444,7 +505,7 @@ mod test {
 
     #[test]
     fn test_price_changes_after_swap() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
@@ -459,7 +520,7 @@ mod test {
 
     #[test]
     fn test_constant_product_invariant() {
-        let (env, contract_id, _, _, user) = setup_test();
+        let (env, contract_id, _, _, user, _) = setup_test();
         let client = LpPoolContractClient::new(&env, &contract_id);
 
         client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
@@ -472,5 +533,40 @@ mod test {
 
         // k should increase (fees stay in pool)
         assert!(k_after >= k_before);
+    }
+
+    #[test]
+    fn test_protocol_fee_collection() {
+        let (env, contract_id, _, native_id, user, admin) = setup_test();
+        let client = LpPoolContractClient::new(&env, &contract_id);
+
+        client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
+
+        assert_eq!(client.accrued_protocol_fees(), 0);
+        assert_eq!(client.protocol_fee_bps(), 5);
+
+        client.swap_xlm_to_sxlm(&user, &10_000_0000000, &0);
+
+        let accrued = client.accrued_protocol_fees();
+        assert!(accrued > 0, "protocol fees should accrue on XLM→sXLM swap");
+        assert_eq!(accrued, 5_0000000);
+
+        let admin_balance_before = token::Client::new(&env, &native_id).balance(&admin);
+        let collected = client.collect_protocol_fees();
+        let admin_balance_after = token::Client::new(&env, &native_id).balance(&admin);
+
+        assert_eq!(collected, accrued);
+        assert_eq!(admin_balance_after - admin_balance_before, accrued);
+        assert_eq!(client.accrued_protocol_fees(), 0);
+    }
+
+    #[test]
+    fn test_sxlm_to_xlm_no_protocol_fee() {
+        let (env, contract_id, _, _, user, _) = setup_test();
+        let client = LpPoolContractClient::new(&env, &contract_id);
+
+        client.add_liquidity(&user, &100_000_0000000, &100_000_0000000);
+        client.swap_sxlm_to_xlm(&user, &10_000_0000000, &0);
+        assert_eq!(client.accrued_protocol_fees(), 0);
     }
 }

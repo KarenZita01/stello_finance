@@ -479,6 +479,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AccruedProtocolFees"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 0
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Admin"
                             }
                           ]
@@ -524,6 +539,21 @@
                         },
                         "val": {
                           "address": "CACMVW2KK4H5FZDFF2AUCAKQTEJMZZWJUIZF23XMRVYQBSXYLHZ6BKWN"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "ProtocolFeeBps"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 5
+                          }
                         }
                       },
                       {

@@ -16,6 +16,7 @@ import {
   callUpdateCollateralFactor,
   callUpdateBorrowRate,
   callUpdateLiquidationThreshold,
+  callSetLpProtocolFeeBps,
 } from "../../staking-engine/contractClient.js";
 
 const createProposalSchema = z.object({
@@ -133,6 +134,10 @@ async function applyGovernanceParam(paramKey: string, newValue: string): Promise
       case "liquidation_threshold":
         await callUpdateLiquidationThreshold(value);
         console.log(`[Governance] Applied liquidation_threshold = ${value} bps`);
+        break;
+      case "lp_protocol_fee_bps":
+        await callSetLpProtocolFeeBps(value);
+        console.log(`[Governance] Applied lp_protocol_fee_bps = ${value}`);
         break;
       default:
         console.log(`[Governance] Param "${paramKey}" does not map to a contract call — governance-only param`);
@@ -471,6 +476,7 @@ export const governanceRoutes: FastifyPluginAsync<{ prisma: PrismaClient }> = as
       { key: "collateral_factor", defaultValue: "7000", description: "Lending collateral factor in bps (70%)" },
       { key: "borrow_rate_bps", defaultValue: "400", description: "Lending borrow rate in basis points (4% = 400)" },
       { key: "liquidation_threshold", defaultValue: "8000", description: "Liquidation threshold in bps (80% = 8000)" },
+      { key: "lp_protocol_fee_bps", defaultValue: "5", description: "LP pool protocol fee in basis points (5 = 0.05% of swap input)" },
       { key: "buffer_safety_factor", defaultValue: "250", description: "Liquidity buffer safety factor (2.5x)" },
     ];
 

@@ -348,32 +348,37 @@ impl StakingContract {
         );
     }
 
-    /// Withdraw accumulated protocol fees to the treasury address.
-    pub fn withdraw_fees(env: Env) {
+    /// Withdraw protocol fees to the admin address.
+    /// If amount > 0, withdraw that specific amount; if 0, withdraw all.
+    pub fn withdraw_fees(env: Env, amount: i128) {
         let admin = read_admin(&env);
         admin.require_auth();
         extend_instance(&env);
 
         let treasury_bal = read_i128(&env, &DataKey::TreasuryBalance);
-        if treasury_bal <= 0 {
+
+        let withdraw_amount = if amount <= 0 {
+            treasury_bal
+        } else {
+            amount
+        };
+
+        if withdraw_amount <= 0 {
             panic!("no fees to withdraw");
         }
-
-        let treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| admin.clone());
+        if withdraw_amount > treasury_bal {
+            panic!("insufficient treasury balance");
+        }
 
         let native_token_addr = read_native_token(&env);
         let xlm_client = token::Client::new(&env, &native_token_addr);
-        xlm_client.transfer(&env.current_contract_address(), &treasury, &treasury_bal);
+        xlm_client.transfer(&env.current_contract_address(), &admin, &withdraw_amount);
 
-        write_i128(&env, &DataKey::TreasuryBalance, 0);
+        write_i128(&env, &DataKey::TreasuryBalance, treasury_bal - withdraw_amount);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("fee_out"),),
-            (treasury, treasury_bal),
+            (admin, withdraw_amount),
         );
     }
 
@@ -639,6 +644,40 @@ mod test {
         client.add_rewards(&gross_reward);
         assert_eq!(client.total_xlm_staked(), 900_0000000);
         assert_eq!(client.treasury_balance(), 100_0000000);
+    }
+
+    #[test]
+    fn test_withdraw_fees_partial() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let sxlm_id = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
+        let native_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+
+        let contract_id = env.register_contract(None, StakingContract);
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &sxlm_id, &native_id, &17280u32);
+
+        // Fund contract with XLM so withdraw_fees can transfer out
+        let sac_client = soroban_sdk::token::StellarAssetClient::new(&env, &native_id);
+        sac_client.mint(&contract_id, &10_000_0000000);
+
+        // add_rewards builds treasury (10% of 1000 = 100 treasury)
+        client.add_rewards(&1000_0000000);
+        assert_eq!(client.treasury_balance(), 100_0000000);
+
+        let token_client = soroban_sdk::token::Client::new(&env, &native_id);
+        let admin_balance_before = token_client.balance(&admin);
+
+        // Withdraw partial (50 XLM)
+        client.withdraw_fees(&50_0000000);
+        assert_eq!(client.treasury_balance(), 50_0000000);
+        assert_eq!(token_client.balance(&admin) - admin_balance_before, 50_0000000);
+
+        // Withdraw remaining (pass 0 = withdraw all)
+        client.withdraw_fees(&0);
+        assert_eq!(client.treasury_balance(), 0);
     }
 
     #[test]

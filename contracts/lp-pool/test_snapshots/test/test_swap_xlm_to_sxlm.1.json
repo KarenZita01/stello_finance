@@ -566,6 +566,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AccruedProtocolFees"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 5000000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Admin"
                             }
                           ]
@@ -617,6 +632,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "ProtocolFeeBps"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 5
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "ReserveSxlm"
                             }
                           ]
@@ -639,7 +669,7 @@
                         "val": {
                           "i128": {
                             "hi": 0,
-                            "lo": 1010000000000
+                            "lo": 1009995000000
                           }
                         }
                       },

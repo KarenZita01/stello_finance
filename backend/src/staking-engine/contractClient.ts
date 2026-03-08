@@ -451,6 +451,12 @@ async function executeAdminContractCall(
   return result.hash;
 }
 
+export async function callWithdrawFees(amount: bigint): Promise<string> {
+  return executeAdminContractCall("withdraw_fees", [
+    nativeToScVal(amount, { type: "i128" }),
+  ]);
+}
+
 export async function callAddRewards(amount: bigint): Promise<string> {
   return executeAdminContractCall("add_rewards", [
     nativeToScVal(amount, { type: "i128" }),
@@ -483,6 +489,73 @@ export async function callSetCooldownPeriod(period: number): Promise<string> {
   return executeAdminContractCall("set_cooldown_period", [
     nativeToScVal(period, { type: "u64" }),
   ]);
+}
+
+function getLpPoolContract(): Contract {
+  return new Contract(config.contracts.lpPoolContractId);
+}
+
+async function executeLpPoolAdminCall(
+  method: string,
+  args: ReturnType<typeof nativeToScVal>[] = []
+): Promise<string> {
+  const { keypair, account } = await getSourceAccount();
+  const contract = getLpPoolContract();
+
+  const op = contract.call(method, ...args);
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(op)
+    .setTimeout(300)
+    .build();
+
+  const preparedTx = await server.prepareTransaction(tx);
+  preparedTx.sign(keypair);
+
+  const result = await server.sendTransaction(preparedTx);
+  if (result.status === "ERROR") {
+    throw new Error(`lp_pool::${method} failed: ${JSON.stringify(result.errorResult)}`);
+  }
+
+  await pollTransaction(result.hash);
+  console.log(`[contractClient] lp_pool::${method} executed: ${result.hash}`);
+  return result.hash;
+}
+
+export async function callCollectProtocolFees(): Promise<string> {
+  return executeLpPoolAdminCall("collect_protocol_fees");
+}
+
+export async function callSetLpProtocolFeeBps(bps: number): Promise<string> {
+  return executeLpPoolAdminCall("set_protocol_fee_bps", [
+    nativeToScVal(bps, { type: "u32" }),
+  ]);
+}
+
+export async function getLpAccruedProtocolFees(): Promise<bigint> {
+  const contract = getLpPoolContract();
+  const { keypair, account } = await getSourceAccount();
+
+  const readOp = contract.call("accrued_protocol_fees");
+
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(readOp)
+    .setTimeout(30)
+    .build();
+
+  const simResult = await server.simulateTransaction(tx);
+
+  if (rpc.Api.isSimulationSuccess(simResult) && simResult.result) {
+    return BigInt(scValToNative(simResult.result.retval));
+  }
+
+  return BigInt(0);
 }
 
 async function executeLendingAdminCall(
