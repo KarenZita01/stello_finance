@@ -9,6 +9,7 @@ import Liquidity from './pages/Liquidity';
 import Governance from './pages/Governance';
 import Leverage from './pages/Leverage';
 import Restaking from './pages/Restaking';
+import Bridge from './pages/Bridge';
 
 function App() {
   return (
@@ -49,6 +50,7 @@ function App() {
             <Route path="/governance" element={<Governance />} />
             <Route path="/leverage" element={<Leverage />} />
             <Route path="/restaking" element={<Restaking />} />
+            <Route path="/bridge" element={<Bridge />} />
           </Routes>
         </main>
       </div>
