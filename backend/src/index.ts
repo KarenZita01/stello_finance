@@ -4,8 +4,11 @@ import { StakingEngine } from "./staking-engine/index.js";
 import { RewardEngine } from "./reward-engine/index.js";
 import { RiskEngine } from "./risk-engine/index.js";
 import { EventListenerService } from "./event-listener/index.js";
+import { HubbleIndexer } from "./hubble-indexer/index.js";
 import { UserService } from "./user-service/index.js";
 import { MetricsCron } from "./metrics-cron/index.js";
+import { MetricAggregator } from "./metric-aggregator/index.js";
+import { CohortAggregator } from "./cohort-aggregator/index.js";
 import { KeeperBot } from "./keeper/index.js";
 import { startApiGateway } from "./api-gateway/server.js";
 import { config } from "./config/index.js";
@@ -30,16 +33,22 @@ async function main() {
   const rewardEngine = new RewardEngine(prisma);
   const riskEngine = new RiskEngine(prisma);
   const eventListener = new EventListenerService(prisma);
+  const hubbleIndexer = new HubbleIndexer(prisma);
   const userService = new UserService(prisma);
   const metricsCron = new MetricsCron(prisma);
+  const metricAggregator = new MetricAggregator(prisma);
+  const cohortAggregator = new CohortAggregator(prisma);
   const keeperBot = new KeeperBot();
 
   await stakingEngine.initialize();
   await rewardEngine.initialize();
   await riskEngine.initialize();
   await eventListener.initialize();
+  await hubbleIndexer.initialize();
   await userService.initialize();
   await metricsCron.initialize();
+  await metricAggregator.initialize();
+  await cohortAggregator.initialize();
   await keeperBot.initialize();
 
   // Start API Gateway
@@ -60,8 +69,11 @@ async function main() {
     await rewardEngine.shutdown();
     await riskEngine.shutdown();
     await eventListener.shutdown();
+    await hubbleIndexer.shutdown();
     await userService.shutdown();
     await metricsCron.shutdown();
+    await metricAggregator.shutdown();
+    await cohortAggregator.shutdown();
     await keeperBot.shutdown();
     await shutdownEventBus();
     await prisma.$disconnect();
