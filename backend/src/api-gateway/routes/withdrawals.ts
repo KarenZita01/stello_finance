@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { UserService } from "../../user-service/index.js";
 import { stellarAddressSchema } from "../middleware/validation.js";
+import { requireAuth } from "../auth.js";
 
 export const withdrawalRoutes: FastifyPluginAsync<{ userService: UserService }> = async (
   fastify,
@@ -39,14 +40,19 @@ export const withdrawalRoutes: FastifyPluginAsync<{ userService: UserService }> 
    * POST /staking/withdrawals/mark-claimed
    * Mark a withdrawal as claimed after successful on-chain claim.
    */
-  fastify.post("/staking/withdrawals/mark-claimed", async (request, reply) => {
+  fastify.post("/staking/withdrawals/mark-claimed", { preHandler: requireAuth }, async (request, reply) => {
     try {
       const body = z.object({
         wallet: stellarAddressSchema,
-        withdrawalId: z.string().min(1, "Withdrawal ID is required"),
+        withdrawalId: z.coerce.number().int().positive("Withdrawal ID is required"),
       }).parse(request.body);
 
-      await userService.markWithdrawalClaimed(body.wallet, Number(body.withdrawalId));
+      const authenticatedWallet = (request as typeof request & { wallet?: string }).wallet;
+      if (!authenticatedWallet || authenticatedWallet !== body.wallet) {
+        return reply.status(403).send({ error: "Wallet mismatch: unauthorized withdrawal update" });
+      }
+
+      await userService.markWithdrawalClaimed(body.wallet, body.withdrawalId);
       return { success: true };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to update withdrawal";

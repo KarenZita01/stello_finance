@@ -10,6 +10,18 @@ function requireEnv(key: string, fallback?: string): string {
   return value;
 }
 
+function assertProductionConfig(nodeEnv: string, jwtSecret: string, adminSecretKey: string): void {
+  if (nodeEnv !== "production") return;
+
+  if (jwtSecret === "sxlm-dev-jwt-secret-change-in-production") {
+    throw new Error("Insecure JWT_SECRET detected in production");
+  }
+
+  if (!adminSecretKey) {
+    throw new Error("Missing ADMIN_SECRET_KEY in production");
+  }
+}
+
 export const config = {
   stellar: {
     rpcUrl: requireEnv("STELLAR_RPC_URL", "https://mainnet.sorobanrpc.com"),
@@ -93,5 +105,7 @@ export const config = {
     withdrawalPollIntervalMs: 30_000, // 30 seconds
   },
 } as const;
+
+assertProductionConfig(config.server.nodeEnv, config.jwt.secret, config.admin.secretKey);
 
 export type Config = typeof config;

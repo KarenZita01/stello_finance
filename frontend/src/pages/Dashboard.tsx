@@ -12,6 +12,8 @@
 import { useState, useRef, useEffect, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { useProtocol } from '../hooks/useProtocol';
+import { useWallet } from '../hooks/useWallet';
+import { useTransactionExport } from '../hooks/useTransactionExport';
 
 /* ── Stellar brand palette ────────────────────────────────────────────────── */
 const Y  = '#F5CF00';   // Stellar yellow
@@ -231,6 +233,8 @@ function ProductCard({
 /* ── Main ─────────────────────────────────────────────────────────────────── */
 export default function Dashboard() {
   const { stats, apy, isLoading } = useProtocol();
+  const { isConnected } = useWallet();
+  const { exportTransactionsCSV, isExporting } = useTransactionExport();
 
   const tvlXlm  = stats.totalStaked / 1e7;
   const apr     = apy.currentApy > 0 ? apy.currentApy : (apy.apy30d > 0 ? apy.apy30d : 0);
@@ -376,6 +380,40 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      {/* ══ EXPORT TRANSACTIONS ═════════════════════════════════════════ */}
+      {isConnected && (
+        <section style={{ borderBottom: `1px solid ${BR}`, background: 'rgba(13,13,13,0.4)' }}>
+          <div style={wrap()}>
+            <div style={{ ...sectionPad(32), display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <p style={yl}>Audit & Tax Reporting</p>
+                <h3 style={{ ...sh, marginBottom: 0, fontSize: 18 }}>Export Transaction History</h3>
+              </div>
+              <button
+                onClick={exportTransactionsCSV}
+                disabled={isExporting}
+                style={{
+                  background: Y,
+                  color: B,
+                  padding: '10px 24px',
+                  borderRadius: 6,
+                  border: 'none',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isExporting ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.15s',
+                  opacity: isExporting ? 0.6 : 1,
+                }}
+                onMouseEnter={(e) => !isExporting && (e.currentTarget.style.background = YD)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = Y)}
+              >
+                {isExporting ? 'Exporting...' : 'Download CSV'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ══ WHAT IS sXLM ════════════════════════════════════════════════ */}
       <section style={{ ...sectionPad(), ...divider }}>

@@ -112,6 +112,37 @@ export const lendingRoutes: FastifyPluginAsync<{ prisma: PrismaClient }> = async
   const server = new rpc.Server(config.stellar.rpcUrl);
   const lendingContractId = config.contracts.lendingContractId;
 
+  function classifyRisk(healthFactor: number): {
+    riskLevel: "safe" | "warning" | "critical";
+    recommendation: string;
+  } {
+    if (healthFactor <= 0) {
+      return {
+        riskLevel: "safe",
+        recommendation: "No active debt position detected.",
+      };
+    }
+
+    if (healthFactor < 1.0) {
+      return {
+        riskLevel: "critical",
+        recommendation: "Position is liquidatable. Repay debt or add collateral immediately.",
+      };
+    }
+
+    if (healthFactor < 1.5) {
+      return {
+        riskLevel: "warning",
+        recommendation: "Health factor is low. Consider adding collateral or repaying part of your debt.",
+      };
+    }
+
+    return {
+      riskLevel: "safe",
+      recommendation: "Position health is stable.",
+    };
+  }
+
   /**
    * POST /lending/deposit-collateral
    * Build unsigned tx: deposit sXLM as collateral.
@@ -419,6 +450,50 @@ export const lendingRoutes: FastifyPluginAsync<{ prisma: PrismaClient }> = async
         liquidationThresholdBps: 8000,
         borrowRateBps: 500,
         utilizationRate: 0,
+      };
+    }
+  });
+
+  /**
+   * GET /lending/alerts/:wallet
+   * Returns lending risk classification based on health factor.
+   */
+  fastify.get("/lending/alerts/:wallet", async (request) => {
+    const { wallet } = request.params as { wallet: string };
+
+    try {
+      const healthFactorRaw = await queryContractView(
+        server,
+        lendingContractId,
+        "health_factor",
+        [new Address(wallet).toScVal()]
+      );
+
+      const healthFactor = Number(healthFactorRaw ?? 0) / 1e7;
+      const classification = classifyRisk(healthFactor);
+
+      return {
+        wallet,
+        healthFactor,
+        ...classification,
+        source: "chain",
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      const dbPosition = await prisma.collateralPosition.findFirst({
+        where: { wallet },
+        orderBy: { updatedAt: "desc" },
+      });
+
+      const healthFactor = dbPosition?.healthFactor ?? 0;
+      const classification = classifyRisk(healthFactor);
+
+      return {
+        wallet,
+        healthFactor,
+        ...classification,
+        source: "db",
+        timestamp: new Date().toISOString(),
       };
     }
   });

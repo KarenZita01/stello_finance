@@ -20,9 +20,16 @@ interface LendingStats {
   utilizationRate: number;
 }
 
+interface LendingAlert {
+  healthFactor: number;
+  riskLevel: 'safe' | 'warning' | 'critical';
+  recommendation: string;
+}
+
 interface UseLendingReturn {
   position: LendingPosition;
   stats: LendingStats;
+  alert: LendingAlert;
   isLoading: boolean;
   isSubmitting: boolean;
   isPending: boolean;
@@ -54,10 +61,17 @@ const DEFAULT_STATS: LendingStats = {
   utilizationRate: 0,
 };
 
+const DEFAULT_ALERT: LendingAlert = {
+  healthFactor: 0,
+  riskLevel: 'safe',
+  recommendation: 'No active debt position detected.',
+};
+
 export function useLending(): UseLendingReturn {
   const { publicKey, isConnected, signTransaction, getAuthHeaders } = useWallet();
   const [position, setPosition] = useState<LendingPosition>(DEFAULT_POSITION);
   const [stats, setStats] = useState<LendingStats>(DEFAULT_STATS);
+  const [alert, setAlert] = useState<LendingAlert>(DEFAULT_ALERT);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPending, setIsPending] = useState(false);
@@ -68,10 +82,13 @@ export function useLending(): UseLendingReturn {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsRes, posRes] = await Promise.allSettled([
+      const [statsRes, posRes, alertRes] = await Promise.allSettled([
         axios.get(`${API_BASE_URL}/api/lending/stats`),
         publicKey
           ? axios.get(`${API_BASE_URL}/api/lending/position/${publicKey}`)
+          : Promise.resolve(null),
+        publicKey
+          ? axios.get(`${API_BASE_URL}/api/lending/alerts/${publicKey}`)
           : Promise.resolve(null),
       ]);
 
@@ -80,6 +97,11 @@ export function useLending(): UseLendingReturn {
       }
       if (posRes.status === 'fulfilled' && posRes.value?.data) {
         setPosition(posRes.value.data);
+      }
+      if (alertRes.status === 'fulfilled' && alertRes.value?.data) {
+        setAlert(alertRes.value.data);
+      } else if (!publicKey) {
+        setAlert(DEFAULT_ALERT);
       }
     } catch {
       // Keep defaults
@@ -217,6 +239,7 @@ export function useLending(): UseLendingReturn {
   return {
     position,
     stats,
+    alert,
     isLoading,
     isSubmitting,
     isPending,

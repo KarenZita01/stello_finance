@@ -13,11 +13,15 @@ export const adminRoutes: FastifyPluginAsync<{ stakingEngine: StakingEngine }> =
 ) => {
   const { stakingEngine } = opts;
 
-  // Simple admin auth: require X-Admin-Key header matching the admin public key
+  // Require a private admin key header; never use the public key for auth.
   fastify.addHook("preHandler", async (request, reply) => {
     const adminKey = request.headers["x-admin-key"];
-    if (adminKey !== config.admin.publicKey) {
-      reply.status(403).send({ error: "Unauthorized — admin key required" });
+    if (!config.admin.secretKey) {
+      return reply.status(500).send({ error: "Admin key not configured" });
+    }
+
+    if (adminKey !== config.admin.secretKey) {
+      return reply.status(403).send({ error: "Unauthorized - admin key required" });
     }
   });
 

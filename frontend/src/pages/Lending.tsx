@@ -9,6 +9,7 @@ export default function Lending() {
   const {
     position,
     stats,
+    alert,
     isLoading,
     isSubmitting,
     isPending,
@@ -71,6 +72,28 @@ export default function Lending() {
         <h1 className="text-3xl font-bold text-white mb-2">Lending</h1>
         <p className="text-gray-400">Use sXLM as collateral to borrow XLM</p>
       </div>
+
+      {isConnected && alert.riskLevel !== 'safe' && (
+        <div
+          className={`rounded-xl border p-4 ${
+            alert.riskLevel === 'critical'
+              ? 'bg-red-500/10 border-red-500/30'
+              : 'bg-yellow-500/10 border-yellow-500/30'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle
+              className={`w-4 h-4 ${alert.riskLevel === 'critical' ? 'text-red-400' : 'text-yellow-400'}`}
+            />
+            <p className={`text-sm font-semibold ${alert.riskLevel === 'critical' ? 'text-red-300' : 'text-yellow-300'}`}>
+              {alert.riskLevel === 'critical' ? 'Critical lending risk' : 'Lending risk warning'}
+            </p>
+          </div>
+          <p className={`mt-2 text-xs ${alert.riskLevel === 'critical' ? 'text-red-200' : 'text-yellow-200'}`}>
+            {alert.recommendation} Current health factor: {alert.healthFactor.toFixed(2)}
+          </p>
+        </div>
+      )}
 
       {/* Protocol Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -370,4 +370,173 @@ export const analyticsRoutes: FastifyPluginAsync<{ prisma: PrismaClient }> = asy
       return { timestamp: new Date().toISOString(), tvl: null, utilization: null, revenue: {} };
     }
   });
+
+  /**
+   * GET /analytics/export/transactions?wallet
+   * Export user transaction history as CSV.
+   * Includes: stake, unstake, borrow, repay, liquidation, flash loan events.
+   */
+  fastify.get<{ Querystring: { wallet?: string } }>(
+    "/analytics/export/transactions",
+    async (request, reply) => {
+      const wallet = request.query.wallet as string | undefined;
+
+      if (!wallet) {
+        return reply
+          .status(400)
+          .send({ error: "wallet query parameter is required" });
+      }
+
+      try {
+        // Fetch all transaction types for the wallet
+        const [stakes, borrows, repays, liquidations, flashLoans] =
+          await Promise.all([
+            prisma.stakeEvent.findMany({
+              where: { wallet },
+              orderBy: { ledgerClosedAt: "asc" },
+              select: {
+                id: true,
+                txHash: true,
+                type: true,
+                amount: true,
+                ledgerClosedAt: true,
+                createdAt: true,
+              },
+            }),
+            prisma.borrowEvent.findMany({
+              where: { wallet },
+              orderBy: { ledgerClosedAt: "asc" },
+              select: {
+                id: true,
+                txHash: true,
+                amount: true,
+                asset: true,
+                ledgerClosedAt: true,
+                createdAt: true,
+              },
+            }),
+            prisma.repayEvent.findMany({
+              where: { wallet },
+              orderBy: { ledgerClosedAt: "asc" },
+              select: {
+                id: true,
+                txHash: true,
+                amount: true,
+                asset: true,
+                ledgerClosedAt: true,
+                createdAt: true,
+              },
+            }),
+            prisma.liquidationEvent.findMany({
+              where: { borrower: wallet },
+              orderBy: { ledgerClosedAt: "asc" },
+              select: {
+                id: true,
+                txHash: true,
+                borrower: true,
+                liquidator: true,
+                debtRepaid: true,
+                collateralSeized: true,
+                ledgerClosedAt: true,
+                createdAt: true,
+              },
+            }),
+            prisma.flashLoanEvent.findMany({
+              where: { wallet },
+              orderBy: { ledgerClosedAt: "asc" },
+              select: {
+                id: true,
+                txHash: true,
+                amount: true,
+                asset: true,
+                fee: true,
+                ledgerClosedAt: true,
+                createdAt: true,
+              },
+            }),
+          ]);
+
+        // Build CSV rows
+        const rows: string[] = [
+          "Date,Type,Asset,Amount,Fee,Tx Hash,Status",
+        ];
+
+        // Process stake events
+        for (const s of stakes) {
+          const date = s.ledgerClosedAt
+            ?.toISOString()
+            .split("T")[0] || new Date().toISOString().split("T")[0];
+          const type = s.type === "STAKE" ? "Stake" : "Unstake";
+          const amountXlm = (Number(s.amount) / 1e7).toFixed(7);
+          rows.push(
+            `${date},${type},sXLM,${amountXlm},,${s.txHash},Confirmed`
+          );
+        }
+
+        // Process borrow events
+        for (const b of borrows) {
+          const date = b.ledgerClosedAt
+            ?.toISOString()
+            .split("T")[0] || new Date().toISOString().split("T")[0];
+          const amountXlm = (Number(b.amount) / 1e7).toFixed(7);
+          rows.push(
+            `${date},Borrow,${b.asset},${amountXlm},,${b.txHash},Confirmed`
+          );
+        }
+
+        // Process repay events
+        for (const r of repays) {
+          const date = r.ledgerClosedAt
+            ?.toISOString()
+            .split("T")[0] || new Date().toISOString().split("T")[0];
+          const amountXlm = (Number(r.amount) / 1e7).toFixed(7);
+          rows.push(
+            `${date},Repay,${r.asset},${amountXlm},,${r.txHash},Confirmed`
+          );
+        }
+
+        // Process liquidation events (as borrower)
+        for (const l of liquidations) {
+          const date = l.ledgerClosedAt
+            ?.toISOString()
+            .split("T")[0] || new Date().toISOString().split("T")[0];
+          const debtXlm = (Number(l.debtRepaid) / 1e7).toFixed(7);
+          const collateralXlm = (Number(l.collateralSeized) / 1e7).toFixed(7);
+          rows.push(
+            `${date},Liquidated (Debt),XLM,-${debtXlm},,${l.txHash},Confirmed`
+          );
+          rows.push(
+            `${date},Liquidated (Collateral),sXLM,-${collateralXlm},,${l.txHash},Confirmed`
+          );
+        }
+
+        // Process flash loan events
+        for (const f of flashLoans) {
+          const date = f.ledgerClosedAt
+            ?.toISOString()
+            .split("T")[0] || new Date().toISOString().split("T")[0];
+          const amountXlm = (Number(f.amount) / 1e7).toFixed(7);
+          const feeXlm = (Number(f.fee) / 1e7).toFixed(7);
+          rows.push(
+            `${date},Flash Loan,${f.asset},${amountXlm},${feeXlm},${f.txHash},Confirmed`
+          );
+        }
+
+        // Generate CSV
+        const csv = rows.join("\n");
+
+        // Return with CSV headers
+        reply.header("Content-Type", "text/csv");
+        reply.header(
+          "Content-Disposition",
+          `attachment; filename="sxlm-transactions-${wallet.slice(0, 8)}-${new Date().toISOString().split("T")[0]}.csv"`
+        );
+        return csv;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : "Export failed";
+        return reply.status(400).send({ error: message });
+      }
+    }
+  );
 };
