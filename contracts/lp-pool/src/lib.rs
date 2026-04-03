@@ -588,6 +588,7 @@ impl LpPoolContract {
         let reserve_sxlm = read_i128(&env, &DataKey::ReserveSxlm);
         assert!(reserve_xlm > 0 && reserve_sxlm > 0, "pool has no liquidity");
 
+        // x * y = k → sxlm_out = reserve_sxlm - k / (reserve_xlm + amount_after_fee)
         let sxlm_out =
             reserve_sxlm - (reserve_xlm * reserve_sxlm) / (reserve_xlm + amount_after_fee);
         assert!(
@@ -609,6 +610,7 @@ impl LpPoolContract {
         let protocol_fee_bps = read_i128(&env, &DataKey::ProtocolFeeBps);
         let protocol_cut = total_fee * protocol_fee_bps / fee_bps;
 
+        // Reserve gets full amount MINUS protocol cut
         write_i128(
             &env,
             &DataKey::ReserveXlm,
