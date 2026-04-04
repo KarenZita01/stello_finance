@@ -221,13 +221,16 @@ impl LendingContract {
         }
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::NativeToken, &native_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::NativeToken, &native_token);
         env.storage()
             .instance()
             .set(&DataKey::BorrowRateBps, &(borrow_rate_bps as i128));
-        env.storage()
-            .instance()
-            .set(&DataKey::LiquidationBonusBps, &DEFAULT_LIQUIDATION_BONUS_BPS);
+        env.storage().instance().set(
+            &DataKey::LiquidationBonusBps,
+            &DEFAULT_LIQUIDATION_BONUS_BPS,
+        );
 
         // Register sXLM as first supported collateral (1:1 price with XLM initially)
         let sxlm_config = AssetConfig {
@@ -365,11 +368,7 @@ impl LendingContract {
         assert!(assets.contains(&asset), "unsupported collateral asset");
 
         // Transfer from user to contract
-        token::Client::new(&env, &asset).transfer(
-            &user,
-            &env.current_contract_address(),
-            &amount,
-        );
+        token::Client::new(&env, &asset).transfer(&user, &env.current_contract_address(), &amount);
 
         // Update user's per-asset collateral
         let current = read_user_asset_collateral(&env, &user, &asset);
@@ -400,11 +399,13 @@ impl LendingContract {
 
         if borrowed > 0 {
             // Check health factor using CF (same threshold as borrow) with hypothetical new balance.
-            let weighted = compute_weighted_collateral_with_override(
-                &env, &user, &asset, new_amount, false,
-            );
+            let weighted =
+                compute_weighted_collateral_with_override(&env, &user, &asset, new_amount, false);
             let hf = weighted * RATE_PRECISION / borrowed;
-            assert!(hf >= RATE_PRECISION, "withdrawal would make position unhealthy");
+            assert!(
+                hf >= RATE_PRECISION,
+                "withdrawal would make position unhealthy"
+            );
         }
 
         write_user_asset_collateral(&env, &user, &asset, new_amount);
@@ -413,11 +414,7 @@ impl LendingContract {
         let total = read_i128_instance(&env, &total_key);
         write_i128_instance(&env, &total_key, total - amount);
 
-        token::Client::new(&env, &asset).transfer(
-            &env.current_contract_address(),
-            &user,
-            &amount,
-        );
+        token::Client::new(&env, &asset).transfer(&env.current_contract_address(), &user, &amount);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("withdraw"),),
@@ -436,7 +433,10 @@ impl LendingContract {
 
         // max_borrow = Σ (col_i × price_i × cf_i) / (BPS × RATE_PRECISION)
         let max_borrow = compute_weighted_collateral(&env, &user, false);
-        assert!(new_borrowed <= max_borrow, "borrow exceeds collateral limit");
+        assert!(
+            new_borrowed <= max_borrow,
+            "borrow exceeds collateral limit"
+        );
 
         let native = read_native_token(&env);
         let native_client = token::Client::new(&env, &native);
@@ -490,12 +490,7 @@ impl LendingContract {
     ///   2. Receives `collateral_asset` tokens worth (debt × (1 + bonus)) at the current price.
     ///      If the borrower's balance of that asset is insufficient, the liquidator receives
     ///      whatever is available (capped).
-    pub fn liquidate(
-        env: Env,
-        liquidator: Address,
-        borrower: Address,
-        collateral_asset: Address,
-    ) {
+    pub fn liquidate(env: Env, liquidator: Address, borrower: Address, collateral_asset: Address) {
         liquidator.require_auth();
         extend_instance(&env);
 
@@ -504,7 +499,10 @@ impl LendingContract {
 
         // Validate the collateral asset is in the supported whitelist
         let assets = read_supported_assets(&env);
-        assert!(assets.contains(&collateral_asset), "unsupported collateral asset");
+        assert!(
+            assets.contains(&collateral_asset),
+            "unsupported collateral asset"
+        );
 
         // Use liquidation threshold to determine eligibility
         let weighted_lt = compute_weighted_collateral(&env, &borrower, true);
@@ -513,7 +511,10 @@ impl LendingContract {
 
         // Ensure the borrower actually holds collateral in the requested asset
         let available = read_user_asset_collateral(&env, &borrower, &collateral_asset);
-        assert!(available > 0, "borrower has no collateral in specified asset");
+        assert!(
+            available > 0,
+            "borrower has no collateral in specified asset"
+        );
 
         // Liquidator repays full debt
         token::Client::new(&env, &read_native_token(&env)).transfer(
@@ -558,7 +559,13 @@ impl LendingContract {
 
         env.events().publish(
             (soroban_sdk::symbol_short!("liq"),),
-            (liquidator, borrower, borrowed, collateral_asset, collateral_to_send),
+            (
+                liquidator,
+                borrower,
+                borrowed,
+                collateral_asset,
+                collateral_to_send,
+            ),
         );
     }
 
@@ -587,10 +594,7 @@ impl LendingContract {
         for asset in assets.iter() {
             let amount = read_user_asset_collateral(&env, &user, &asset);
             if amount > 0 {
-                result.push_back(AssetPosition {
-                    asset,
-                    amount,
-                });
+                result.push_back(AssetPosition { asset, amount });
             }
         }
         result
@@ -693,12 +697,15 @@ mod test {
         let admin = Address::generate(&env);
         let user = Address::generate(&env);
 
-        let sxlm_id =
-            env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
-        let usdc_id =
-            env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
-        let native_id =
-            env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let sxlm_id = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
+        let usdc_id = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
+        let native_id = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
 
         let contract_id = env.register_contract(None, LendingContract);
         let client = LendingContractClient::new(&env, &contract_id);
@@ -711,7 +718,14 @@ mod test {
         StellarAssetClient::new(&env, &usdc_id).mint(&user, &100_000_0000000);
         StellarAssetClient::new(&env, &native_id).mint(&contract_id, &500_000_0000000);
 
-        TestCtx { env, contract_id, sxlm_id, usdc_id, native_id, user }
+        TestCtx {
+            env,
+            contract_id,
+            sxlm_id,
+            usdc_id,
+            native_id,
+            user,
+        }
     }
 
     #[test]
@@ -895,10 +909,12 @@ mod test {
         let liq = Address::generate(&env);
 
         // Use a low liquidation threshold (50%) so a 70% borrow is immediately liquidatable
-        let sxlm2 =
-            env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
-        let native2 =
-            env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
+        let sxlm2 = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
+        let native2 = env
+            .register_stellar_asset_contract_v2(Address::generate(&env))
+            .address();
         let contract2 = env.register_contract(None, LendingContract);
         let c2 = LendingContractClient::new(&env, &contract2);
         c2.initialize(&admin, &sxlm2, &native2, &7000, &5000, &500);
@@ -909,9 +925,9 @@ mod test {
         StellarAssetClient::new(&env, &native2).mint(&liq, &100_000_0000000);
 
         c2.deposit_collateral(&u, &sxlm2, &10_000_000_000); // 1000 sXLM
-        c2.borrow(&u, &7_000_000_000);                       // 700 XLM
-        // HF (LT=50%): weighted = 10e9 × 1e7 × 5000 / (10000 × 1e7) = 5e9
-        // HF = 5e9 × 1e7 / 7e9 ≈ 7_142_857 < RATE_PRECISION → liquidatable
+        c2.borrow(&u, &7_000_000_000); // 700 XLM
+                                       // HF (LT=50%): weighted = 10e9 × 1e7 × 5000 / (10000 × 1e7) = 5e9
+                                       // HF = 5e9 × 1e7 / 7e9 ≈ 7_142_857 < RATE_PRECISION → liquidatable
 
         c2.liquidate(&liq, &u, &sxlm2);
 
