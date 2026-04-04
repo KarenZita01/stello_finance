@@ -878,7 +878,7 @@ mod test {
 
         // weighted (LT=8000): 10e9 × 12e6 × 8000 / (10000 × 10e6) = 9.6e9
         // HF = 9.6e9 × 1e7 / 5e9 = 19_200_000
-        let hf = c.health_factor(&t.user);
+        let hf = c.health_factor(&t.env);
         assert_eq!(hf, 19_200_000); // 1.92 × RATE_PRECISION
     }
 
