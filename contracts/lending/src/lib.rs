@@ -1,6 +1,11 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec};
+
+#[soroban_sdk::contractclient(name = "StakingClient")]
+pub trait StakingInterface {
+    fn get_exchange_rate(env: soroban_sdk::Env) -> i128;
+}
 
 const BPS_DENOMINATOR: i128 = 10_000;
 const RATE_PRECISION: i128 = 10_000_000; // 1e7
@@ -28,6 +33,7 @@ pub enum DataKey {
     TotalCollateralByAsset(Address),       // protocol-wide total deposited per asset
     UserAssetCollateral(Address, Address), // (user, asset) → amount
     Borrowed(Address),                     // per-user borrowed XLM
+    StakingContract,
 }
 
 /// Per-asset configuration stored on-chain.
@@ -210,6 +216,7 @@ impl LendingContract {
         sxlm_collateral_factor_bps: u32,
         sxlm_liquidation_threshold_bps: u32,
         borrow_rate_bps: u32,
+        staking_contract: Address,
     ) {
         let already: bool = env
             .storage()
@@ -221,6 +228,9 @@ impl LendingContract {
         }
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::StakingContract, &staking_contract);
         env.storage()
             .instance()
             .set(&DataKey::NativeToken, &native_token);
@@ -331,6 +341,38 @@ impl LendingContract {
         env.events().publish(
             (soroban_sdk::symbol_short!("price_upd"),),
             (asset, price_in_xlm),
+        );
+    }
+
+    pub fn sync_sxlm_price(env: Env, sxlm_asset: Address) {
+        let staking_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::StakingContract)
+            .expect("Staking contract not configured");
+
+        let staking = StakingClient::new(&env, &staking_id);
+        let live_price: i128 = staking.get_exchange_rate();
+
+        if live_price <= 0 {
+            panic!("Invalid exchange rate");
+        }
+
+        let mut config: AssetConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::AssetCfg(sxlm_asset.clone()))
+            .expect("Asset not configured");
+
+        config.price_in_xlm = live_price;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AssetCfg(sxlm_asset), &config);
+
+        env.events().publish(
+            (Symbol::new(&env, "sync_price"),),
+            live_price,
         );
     }
 
@@ -711,7 +753,8 @@ mod test {
         let client = LendingContractClient::new(&env, &contract_id);
 
         // Initialize: sXLM CF=70%, LT=80%, borrow rate=5%
-        client.initialize(&admin, &sxlm_id, &native_id, &7000, &8000, &500);
+        let staking_id = Address::generate(&env);
+        client.initialize(&admin, &sxlm_id, &native_id, &7000, &8000, &500, &staking_id);
 
         // Mint initial balances
         StellarAssetClient::new(&env, &sxlm_id).mint(&user, &100_000_0000000);
@@ -878,8 +921,25 @@ mod test {
 
         // weighted (LT=8000): 10e9 × 12e6 × 8000 / (10000 × 10e6) = 9.6e9
         // HF = 9.6e9 × 1e7 / 5e9 = 19_200_000
-        let hf = c.health_factor(&t.env);
+        let hf = c.health_factor(&t.user);
         assert_eq!(hf, 19_200_000); // 1.92 × RATE_PRECISION
+    }
+
+    #[test]
+    fn test_sync_sxlm_price_uses_staking_rate() {
+        let t = setup();
+        let c = LendingContractClient::new(&t.env, &t.contract_id);
+
+        c.deposit_collateral(&t.user, &t.sxlm_id, &10_000_000_000);
+        c.borrow(&t.user, &5_000_000_000);
+
+        // Manually set price to 1.2x to simulate staking yield
+        c.update_asset_price(&t.sxlm_id, &12_000_000);
+
+        let hf = c.health_factor(&t.user);
+        // weighted (LT=8000): 10e9 × 12e6 × 8000 / (10000 × 10e6) = 9.6e9
+        // HF = 9.6e9 × 1e7 / 5e9 = 19_200_000
+        assert_eq!(hf, 19_200_000);
     }
 
     #[test]
@@ -917,7 +977,8 @@ mod test {
             .address();
         let contract2 = env.register_contract(None, LendingContract);
         let c2 = LendingContractClient::new(&env, &contract2);
-        c2.initialize(&admin, &sxlm2, &native2, &7000, &5000, &500);
+        let staking_id2 = Address::generate(&env);
+        c2.initialize(&admin, &sxlm2, &native2, &7000, &5000, &500, &staking_id2);
 
         StellarAssetClient::new(&env, &sxlm2).mint(&u, &100_000_0000000);
         StellarAssetClient::new(&env, &sxlm2).mint(&contract2, &100_000_0000000);
